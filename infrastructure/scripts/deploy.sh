@@ -85,7 +85,15 @@ init_terraform() {
     print_status "Initializing Terraform..."
     cd "$TERRAFORM_DIR"
     
-    terraform init
+    # Check if backend configuration exists
+    if [ -f "backend-config.hcl" ]; then
+        print_status "Using remote backend configuration..."
+        terraform init -backend-config=backend-config.hcl
+    else
+        print_warning "No remote backend configured. Using local state."
+        print_warning "For production, run './setup-backend.sh' first to configure remote state."
+        terraform init
+    fi
     
     print_success "Terraform initialized"
 }
