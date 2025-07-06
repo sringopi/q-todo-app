@@ -59,5 +59,12 @@ test-results/
 *.md
 !README.md
 
+# Environment files (security)
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
 # Other
 Makefile

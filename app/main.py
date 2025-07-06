@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import settings
 from app.routers import todos
+from app.middleware.ip_filter import IPFilterMiddleware
 
 
 def create_app() -> FastAPI:
@@ -18,6 +19,10 @@ def create_app() -> FastAPI:
         description=settings.description,
         debug=settings.debug,
     )
+    
+    # Add IP filtering middleware (optional - can be enabled/disabled)
+    # Uncomment the next line to enable IP filtering
+    # app.add_middleware(IPFilterMiddleware, enabled=bool(settings.allowed_ips))
     
     # Include routers
     app.include_router(todos.router, prefix="/api/v1")
@@ -60,7 +65,11 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["health"])
     async def health_check():
         """Health check endpoint."""
-        return {"status": "healthy", "version": settings.version}
+        return {
+            "status": "healthy", 
+            "version": settings.version,
+            "ip_filtering": "enabled" if settings.allowed_ips else "disabled"
+        }
     
     # Root endpoint
     @app.get("/", tags=["root"])
@@ -70,7 +79,23 @@ def create_app() -> FastAPI:
             "message": f"Welcome to {settings.app_name}",
             "version": settings.version,
             "docs_url": "/docs",
-            "health_url": "/health"
+            "health_url": "/health",
+            "environment": "development" if settings.debug else "production"
+        }
+    
+    # Configuration info endpoint (for debugging)
+    @app.get("/config", tags=["debug"])
+    async def config_info():
+        """Configuration information endpoint (for debugging)."""
+        if not settings.debug:
+            return {"detail": "Configuration info only available in debug mode"}
+        
+        return {
+            "app_name": settings.app_name,
+            "version": settings.version,
+            "debug": settings.debug,
+            "ip_allowlist_configured": bool(settings.allowed_ips),
+            "allowed_ips_count": len(settings.allowed_ips) if settings.allowed_ips else 0
         }
     
     return app
