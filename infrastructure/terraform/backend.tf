@@ -4,11 +4,11 @@
 terraform {
   backend "s3" {
     # These values will be provided during terraform init
-    # bucket         = "your-terraform-state-bucket"
-    # key            = "todo-api/terraform.tfstate"
-    # region         = "us-east-1"
-    # dynamodb_table = "terraform-state-locks"
-    # encrypt        = true
+    bucket         = "your-terraform-state-bucket"
+    key            = "todo-api/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-state-locks"
+    encrypt        = true
   }
 }
 

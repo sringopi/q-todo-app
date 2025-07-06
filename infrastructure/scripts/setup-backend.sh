@@ -39,25 +39,42 @@ SUFFIX=$(date +%s | tail -c 6)
 BUCKET_NAME="${PROJECT_NAME}-${ENVIRONMENT}-terraform-state-${SUFFIX}"
 TABLE_NAME="${PROJECT_NAME}-${ENVIRONMENT}-terraform-locks"
 
+# Cleanup function for failed resources
+cleanup_failed_resources() {
+    print_status "Cleaning up any failed resources..."
+    
+    # Check if table exists but is in a bad state
+    TABLE_STATUS=$(aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$AWS_REGION" --query 'Table.TableStatus' --output text 2>/dev/null || echo "NOT_FOUND")
+    
+    if [ "$TABLE_STATUS" != "NOT_FOUND" ] && [ "$TABLE_STATUS" != "ACTIVE" ]; then
+        print_warning "Found table in $TABLE_STATUS state. Attempting cleanup..."
+        
+        if [ "$TABLE_STATUS" = "CREATING" ]; then
+            print_status "Waiting for table creation to complete or fail..."
+            aws dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$AWS_REGION" 2>/dev/null || {
+                print_warning "Table creation failed. Attempting to delete..."
+                aws dynamodb delete-table --table-name "$TABLE_NAME" --region "$AWS_REGION" 2>/dev/null || true
+                sleep 10
+            }
+        fi
+    fi
+}
+
 # Create S3 bucket for Terraform state
 create_state_bucket() {
     print_status "Creating S3 bucket for Terraform state: $BUCKET_NAME"
     
     # Create bucket
-    aws s3api create-bucket \
-        --bucket "$BUCKET_NAME" \
-        --region "$AWS_REGION" \
-        --create-bucket-configuration LocationConstraint="$AWS_REGION" 2>/dev/null || {
-        # Handle us-east-1 special case (no LocationConstraint needed)
-        if [ "$AWS_REGION" = "us-east-1" ]; then
-            aws s3api create-bucket \
-                --bucket "$BUCKET_NAME" \
-                --region "$AWS_REGION"
-        else
-            print_error "Failed to create S3 bucket"
-            exit 1
-        fi
-    }
+    if [ "$AWS_REGION" = "us-east-1" ]; then
+        aws s3api create-bucket \
+            --bucket "$BUCKET_NAME" \
+            --region "$AWS_REGION"
+    else
+        aws s3api create-bucket \
+            --bucket "$BUCKET_NAME" \
+            --region "$AWS_REGION" \
+            --create-bucket-configuration LocationConstraint="$AWS_REGION"
+    fi
     
     # Enable versioning
     aws s3api put-bucket-versioning \
@@ -90,19 +107,55 @@ create_state_bucket() {
 create_locks_table() {
     print_status "Creating DynamoDB table for state locking: $TABLE_NAME"
     
+    # Create table without SSE specification initially (to avoid KMS key issues)
     aws dynamodb create-table \
         --table-name "$TABLE_NAME" \
         --attribute-definitions AttributeName=LockID,AttributeType=S \
         --key-schema AttributeName=LockID,KeyType=HASH \
         --billing-mode PAY_PER_REQUEST \
-        --sse-specification Enabled=true \
         --region "$AWS_REGION"
     
     # Wait for table to be active
     print_status "Waiting for DynamoDB table to be active..."
     aws dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$AWS_REGION"
     
+    # Enable server-side encryption after table is created (uses AWS managed key)
+    print_status "Enabling server-side encryption on DynamoDB table..."
+    aws dynamodb update-table \
+        --table-name "$TABLE_NAME" \
+        --sse-specification Enabled=true \
+        --region "$AWS_REGION" 2>/dev/null || {
+        print_warning "Could not enable SSE on DynamoDB table, but table is functional"
+    }
+    
     print_success "DynamoDB table created: $TABLE_NAME"
+}
+
+# Check if resources already exist
+check_existing_resources() {
+    print_status "Checking for existing resources..."
+    
+    # Check if bucket exists
+    if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+        print_warning "Bucket $BUCKET_NAME already exists. Using existing bucket."
+        BUCKET_EXISTS=true
+    else
+        BUCKET_EXISTS=false
+    fi
+    
+    # Check if table exists
+    if aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$AWS_REGION" 2>/dev/null; then
+        TABLE_STATUS=$(aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$AWS_REGION" --query 'Table.TableStatus' --output text)
+        if [ "$TABLE_STATUS" = "ACTIVE" ]; then
+            print_warning "DynamoDB table $TABLE_NAME already exists and is active. Using existing table."
+            TABLE_EXISTS=true
+        else
+            print_warning "DynamoDB table $TABLE_NAME exists but is in $TABLE_STATUS state."
+            TABLE_EXISTS=false
+        fi
+    else
+        TABLE_EXISTS=false
+    fi
 }
 
 # Configure backend in Terraform
@@ -194,16 +247,18 @@ main() {
         exit 1
     fi
     
-    # Check if resources already exist
-    if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-        print_warning "Bucket $BUCKET_NAME already exists. Using existing bucket."
-    else
+    # Cleanup any failed resources first
+    cleanup_failed_resources
+    
+    # Check existing resources
+    check_existing_resources
+    
+    # Create resources if they don't exist
+    if [ "$BUCKET_EXISTS" = false ]; then
         create_state_bucket
     fi
     
-    if aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$AWS_REGION" 2>/dev/null; then
-        print_warning "DynamoDB table $TABLE_NAME already exists. Using existing table."
-    else
+    if [ "$TABLE_EXISTS" = false ]; then
         create_locks_table
     fi
     
@@ -219,7 +274,11 @@ case "${1:-}" in
         create_state_bucket
         ;;
     "table")
+        cleanup_failed_resources
         create_locks_table
+        ;;
+    "cleanup")
+        cleanup_failed_resources
         ;;
     "configure")
         configure_backend
