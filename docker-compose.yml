@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  todo-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=true
+    volumes:
+      # Mount source code for development (optional)
+      - .:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  todo-api-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    volumes:
+      - .:/app
+      - test-results:/app/test-results
+    environment:
+      - PYTHONPATH=/app
+    command: ["pytest", "-v", "--junitxml=/app/test-results/junit.xml", "--cov=app", "--cov-report=html:/app/test-results/htmlcov", "--cov-report=term"]
+    depends_on:
+      - todo-api
+
+volumes:
+  test-results:
