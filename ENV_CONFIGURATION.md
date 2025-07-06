@@ -69,14 +69,47 @@ REDIS_URL=redis://prod-redis:6379
 ## IP Allowlist Feature
 
 ### How It Works
-- The `IP_ALLOWLIST` environment variable contains comma-separated IP addresses
-- When configured, only requests from these IPs are allowed
-- If not configured, all IPs are allowed (no filtering)
+- The `IP_ALLOWLIST` environment variable supports both individual IPs and CIDR ranges
+- **Default Behavior**: If no `IP_ALLOWLIST` is configured or the .env file doesn't exist, **all traffic is allowed** (defaults to `0.0.0.0/0`)
+- **Individual IPs**: Automatically converted to /32 (IPv4) or /128 (IPv6)
+- **CIDR Ranges**: Full CIDR notation support (e.g., `192.168.1.0/24`, `10.0.0.0/8`)
+- **IPv6 Support**: Full IPv6 address and range support
+- **Multiple Entries**: Comma-separated list of IPs and ranges
 
 ### Current Status
-- **Your IP**: `15.254.43.135` is currently allowlisted
+- **Your IPs**: `15.254.43.135/32, 104.172.160.186/32` are currently allowlisted
 - **Middleware**: Available but disabled by default (see `app/main.py`)
 - **Enable**: Uncomment the middleware line in `app/main.py` to activate IP filtering
+
+### Configuration Examples
+
+#### Individual IPs (auto-converted to /32)
+```bash
+IP_ALLOWLIST=15.254.43.135,104.172.160.186
+```
+
+#### CIDR Ranges
+```bash
+IP_ALLOWLIST=192.168.1.0/24,10.0.0.0/8,172.16.0.0/12
+```
+
+#### Mixed IPs and CIDR Ranges
+```bash
+IP_ALLOWLIST=15.254.43.135,192.168.1.0/24,104.172.160.186/32
+```
+
+#### IPv6 Support
+```bash
+IP_ALLOWLIST=2001:db8::/32,::1,192.168.1.0/24
+```
+
+#### Allow All Traffic (default behavior)
+```bash
+# Option 1: Don't set IP_ALLOWLIST at all
+# Option 2: Set it to empty
+IP_ALLOWLIST=
+# Option 3: Don't create .env file
+```
 
 ### Testing IP Configuration
 ```bash
@@ -89,7 +122,22 @@ curl http://localhost:8000/config
   "version": "1.0.0",
   "debug": true,
   "ip_allowlist_configured": true,
-  "allowed_ips_count": 1
+  "ip_allowlist_raw": "15.254.43.135/32,104.172.160.186/32",
+  "allowed_ip_ranges": ["15.254.43.135/32", "104.172.160.186/32"],
+  "allowed_ranges_count": 2,
+  "default_behavior": "restricted"
+}
+```
+
+### Default Behavior Examples
+
+#### No Configuration (allows all)
+```json
+{
+  "ip_allowlist_configured": false,
+  "ip_allowlist_raw": null,
+  "allowed_ip_ranges": ["0.0.0.0/0", "::/0"],
+  "default_behavior": "allow_all"
 }
 ```
 

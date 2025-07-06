@@ -94,8 +94,11 @@ def create_app() -> FastAPI:
             "app_name": settings.app_name,
             "version": settings.version,
             "debug": settings.debug,
-            "ip_allowlist_configured": bool(settings.allowed_ips),
-            "allowed_ips_count": len(settings.allowed_ips) if settings.allowed_ips else 0
+            "ip_allowlist_configured": bool(settings.ip_allowlist),
+            "ip_allowlist_raw": settings.ip_allowlist,
+            "allowed_ip_ranges": [str(network) for network in settings.allowed_ip_ranges],
+            "allowed_ranges_count": len(settings.allowed_ip_ranges),
+            "default_behavior": "allow_all" if not settings.ip_allowlist else "restricted"
         }
     
     return app
